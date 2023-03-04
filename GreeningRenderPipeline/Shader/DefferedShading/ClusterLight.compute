@@ -1,0 +1,92 @@
+#pragma kernel GetCluster
+#pragma kernel ClusterIntersect
+
+
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Core.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Input.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_ClusterLight.hlsl"
+
+int NumClusterX;
+int NumClusterY;
+int NumClusterZ;
+
+
+struct PointLight{
+    float3 Color;
+    float3 PositionWS;
+    float Range;
+};
+int PointLightCount;
+
+RWStructuredBuffer<ClusterBox> ClusterBox_Buffer;
+RWStructuredBuffer<PointLight> PointLightBuffer;
+RWStructuredBuffer<uint2> ValidLightIndex_Buffer;
+
+uint Index3DTo1D(uint3 id){
+    return id.z*NumClusterX*NumClusterY + id.y*NumClusterX +id.x;
+}
+
+[numthreads(8,8,8)]
+void GetCluster (uint3 id : SV_DispatchThreadID)
+{
+    uint id_1D=Index3DTo1D(id);
+    ClusterBox_Buffer[id_1D]=GetClusterFrustum(id,NumClusterX,NumClusterY,NumClusterZ);
+}
+
+[numthreads(8,8,8)]
+void ClusterIntersect (uint3 id : SV_DispatchThreadID)
+{
+    int ClusterId_1D=Index3DTo1D(id);
+    ClusterBox Box=ClusterBox_Buffer[ClusterId_1D];
+
+    float3 p1=mul(World2View_Matrix,float4(Box.p1,1.0f)).xyz;
+    float3 p2=mul(World2View_Matrix,float4(Box.p2,1.0f)).xyz;
+    float3 p3=mul(World2View_Matrix,float4(Box.p3,1.0f)).xyz;
+    float3 p4=mul(World2View_Matrix,float4(Box.p4,1.0f)).xyz;
+    float3 p5=mul(World2View_Matrix,float4(Box.p5,1.0f)).xyz;
+    float3 p6=mul(World2View_Matrix,float4(Box.p6,1.0f)).xyz;
+    float3 p7=mul(World2View_Matrix,float4(Box.p7,1.0f)).xyz;
+    float3 p8=mul(World2View_Matrix,float4(Box.p8,1.0f)).xyz;
+
+    p1.z=abs(p1.z);
+    p2.z=abs(p2.z);
+    p3.z=abs(p3.z);
+    p4.z=abs(p4.z);
+    p5.z=abs(p5.z);
+    p6.z=abs(p6.z);
+    p7.z=abs(p7.z);
+    p8.z=abs(p8.z);
+
+    //每个cluster最多四盏灯
+    int StartIndex=ClusterId_1D*4;
+    int EndIndex=StartIndex;
+    int ValidLightTempBuffer[8];
+    int ValidLightCount=0;
+    for(int j=0;j<8;j++){
+        ValidLightTempBuffer[j]=0;
+    }
+
+    [loop]
+    for(int i=0;i<PointLightCount;i++){
+        float3 LightPoint=PointLightBuffer[i].PositionWS;
+        float3 LightPointVS=mul(World2View_Matrix,float4(LightPoint,1.0f)).xyz;
+        LightPointVS.z=abs(LightPointVS.z);
+        float Radius=PointLightBuffer[i].Range;
+
+        //使用xoz,yoz的投影求交结果最精确
+        bool IsIntersectXoZ=IntersectCircleLadderShaped(LightPointVS.xz,Radius,p1.xz,p2.xz,p5.xz,p6.xz);
+        bool IsIntersectYoZ=IntersectCircleLadderShaped(LightPointVS.yz,Radius,p1.yz,p3.yz,p5.yz,p7.yz);
+        bool IsIntersectFrustum=IsIntersectXoZ && IsIntersectYoZ;
+        //bool IsIntersectFrustum=IntersectAABB(GetAABBfromCluster(GetSphereFrustum(LightPoint,Radius)),GetAABBfromCluster(Box));
+        [branch]
+        if(!IsIntersectFrustum){continue;}
+        ValidLightTempBuffer[ValidLightCount++]=i+1;
+        [branch]
+        if(ValidLightCount>7){break;}
+    }
+    uint2 ValidLightBuffer_Encodeed;
+    ValidLightBuffer_Encodeed.x=Encode4ByteTouint32((uint)ValidLightTempBuffer[0],(uint)ValidLightTempBuffer[1],(uint)ValidLightTempBuffer[2],(uint)ValidLightTempBuffer[3]);
+    ValidLightBuffer_Encodeed.y=Encode4ByteTouint32((uint)ValidLightTempBuffer[4],(uint)ValidLightTempBuffer[5],(uint)ValidLightTempBuffer[6],(uint)ValidLightTempBuffer[7]);
+    ValidLightIndex_Buffer[ClusterId_1D]=ValidLightBuffer_Encodeed;
+}
+
