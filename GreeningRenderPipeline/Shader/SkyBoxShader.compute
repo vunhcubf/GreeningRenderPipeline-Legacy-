@@ -1,0 +1,26 @@
+#pragma kernel SkyBoxShader
+
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Core.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Input.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_EnvironmentLighting.hlsl"
+
+RWTexture2D<float4> DrawSkyBox_Dest;
+Texture2D SceneDepth;
+Texture2D SkyBoxMap;
+
+float Rotation;
+float Exposure;
+
+[numthreads(8,8,1)]
+void SkyBoxShader (uint3 id : SV_DispatchThreadID)
+{
+    float Ndcdepth=SceneDepth.Load(uint3(id.xy,0)).x;
+    [branch]
+    if(Ndcdepth != 0.0f){
+        return;
+    }
+    float2 uv=id.xy*ScreenParams.xy;
+    float3 PositionWS=GetPositionWS(uv,Ndcdepth);
+    float3 ViewDirWS=normalize(_WorldSpaceCameraPos-PositionWS);
+    DrawSkyBox_Dest[id.xy]=SampleCubeMap(SkyBoxMap,ViewDirWS,Rotation,0).xyzz*Exposure;
+}

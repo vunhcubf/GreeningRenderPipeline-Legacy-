@@ -30,8 +30,9 @@ struct VertexOutput_GBuffer{
     float4 PositionCS:SV_POSITION;
     float2 uv:TEXCOORD0;
     float3 NormalWS:NORMAL;
-    float3 TangentWS:NORMAL1;
-    float3 PositionWS:TEXCOORD1;
+    float3 TangentWS:TEXCOORD1;
+    float3 BiNormalWS:TEXCOORD2;
+    float3 PositionWS:TEXCOORD3;
 };
 float2 Transform_Tex(float2 uv,float4 Tex_ST){
     return uv.xy * Tex_ST.xy + Tex_ST.zw;
@@ -44,6 +45,7 @@ VertexOutput_GBuffer Vert_GBuffer(VertexInput_GBuffer v)
     o.PositionCS = mul(unity_MatrixVP,float4(o.PositionCS.xyz,1.0f));//VP变换
     o.NormalWS=mul((float3x3)unity_ObjectToWorld,v.NormalOS);
     o.TangentWS=mul((float3x3)unity_ObjectToWorld,v.TangentOS);
+    o.BiNormalWS=cross(o.NormalWS,o.TangentWS);
     o.uv = v.uv;
     return o;
 }
@@ -61,8 +63,9 @@ GBufferOutput Frag_GBuffer(VertexOutput_GBuffer i){
     //处理法线贴图
     float3 NormalWS=normalize(i.NormalWS);
     float3 TangentWS=normalize(i.TangentWS);
+    float3 BiNormalWS=normalize(i.BiNormalWS);
     float3 NormalMap_Data=tex2D(NormalMap,Transform_Tex(uv,BaseColorMap_ST)).xyz;
-    NormalWS=DecodeNormalMap(TangentWS,NormalWS,NormalMap_Data,NormalMap_Intensity,ReversedNormalMap);
+    NormalWS=DecodeNormalMap(TangentWS,NormalWS,BiNormalWS,NormalMap_Data,NormalMap_Intensity,ReversedNormalMap);
 
     float3 BaseColor=BaseColor_Tint.xyz*tex2D(BaseColorMap,Transform_Tex(uv,BaseColorMap_ST)).xyz;
     float Occlusion=saturate(pow(saturate(tex2D(OcclusionMap,Transform_Tex(uv,BaseColorMap_ST)).x),OcclusionMap_Intensity));

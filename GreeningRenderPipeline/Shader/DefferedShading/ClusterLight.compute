@@ -1,92 +1,70 @@
-#pragma kernel GetCluster
 #pragma kernel ClusterIntersect
 
 
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Core.hlsl"
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Input.hlsl"
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_ClusterLight.hlsl"
-
+#define NumThread_LightIntersection 16
 int NumClusterX;
 int NumClusterY;
 int NumClusterZ;
+int GlobalValidLightList_Count;
 
-
-struct PointLight{
-    float3 Color;
-    float3 PositionWS;
-    float Range;
+struct ComputeShaderInput
+{
+	uint3 GroupID           : SV_GroupID;           // 3D index of the thread group in the dispatch.
+	uint3 GroupThreadID     : SV_GroupThreadID;     // 3D index of local thread ID in a thread group.
+	uint3 DispatchThreadID  : SV_DispatchThreadID;  // 3D index of global thread ID in the dispatch.
+	uint  GroupIndex        : SV_GroupIndex;        // Flattened local index of the thread within a thread group.
 };
-int PointLightCount;
 
-RWStructuredBuffer<ClusterBox> ClusterBox_Buffer;
 RWStructuredBuffer<PointLight> PointLightBuffer;
-RWStructuredBuffer<uint2> ValidLightIndex_Buffer;
+RWStructuredBuffer<uint2> LightAssignTable;
+RWStructuredBuffer<uint> GlobalValidLightList;//全局灯光栈
+RWStructuredBuffer<uint> GlobalValidLightCount_Buffer;//相当于栈指针
+
+groupshared ClusterBox Box;
+groupshared uint Gs_ValidLightCount_ThisCluster;
+groupshared uint Gs_ValidLightList_ThisCluster[512];
+groupshared uint Gs_ValidLightStartOffset;
+groupshared uint Gs_ValidLightCount;
 
 uint Index3DTo1D(uint3 id){
     return id.z*NumClusterX*NumClusterY + id.y*NumClusterX +id.x;
 }
-
-[numthreads(8,8,8)]
-void GetCluster (uint3 id : SV_DispatchThreadID)
+[numthreads(1,1,NumThread_LightIntersection)]
+void ClusterIntersect (ComputeShaderInput In)
 {
-    uint id_1D=Index3DTo1D(id);
-    ClusterBox_Buffer[id_1D]=GetClusterFrustum(id,NumClusterX,NumClusterY,NumClusterZ);
-}
-
-[numthreads(8,8,8)]
-void ClusterIntersect (uint3 id : SV_DispatchThreadID)
-{
-    int ClusterId_1D=Index3DTo1D(id);
-    ClusterBox Box=ClusterBox_Buffer[ClusterId_1D];
-
-    float3 p1=mul(World2View_Matrix,float4(Box.p1,1.0f)).xyz;
-    float3 p2=mul(World2View_Matrix,float4(Box.p2,1.0f)).xyz;
-    float3 p3=mul(World2View_Matrix,float4(Box.p3,1.0f)).xyz;
-    float3 p4=mul(World2View_Matrix,float4(Box.p4,1.0f)).xyz;
-    float3 p5=mul(World2View_Matrix,float4(Box.p5,1.0f)).xyz;
-    float3 p6=mul(World2View_Matrix,float4(Box.p6,1.0f)).xyz;
-    float3 p7=mul(World2View_Matrix,float4(Box.p7,1.0f)).xyz;
-    float3 p8=mul(World2View_Matrix,float4(Box.p8,1.0f)).xyz;
-
-    p1.z=abs(p1.z);
-    p2.z=abs(p2.z);
-    p3.z=abs(p3.z);
-    p4.z=abs(p4.z);
-    p5.z=abs(p5.z);
-    p6.z=abs(p6.z);
-    p7.z=abs(p7.z);
-    p8.z=abs(p8.z);
-
-    //每个cluster最多四盏灯
-    int StartIndex=ClusterId_1D*4;
-    int EndIndex=StartIndex;
-    int ValidLightTempBuffer[8];
-    int ValidLightCount=0;
-    for(int j=0;j<8;j++){
-        ValidLightTempBuffer[j]=0;
+    [branch]
+    if(In.GroupIndex==0){
+        Box=GetClusterFrustum(In.GroupID,NumClusterX,NumClusterY,NumClusterZ);
+        Gs_ValidLightCount_ThisCluster=0;
     }
+    GroupMemoryBarrierWithGroupSync();
 
     [loop]
-    for(int i=0;i<PointLightCount;i++){
-        float3 LightPoint=PointLightBuffer[i].PositionWS;
-        float3 LightPointVS=mul(World2View_Matrix,float4(LightPoint,1.0f)).xyz;
-        LightPointVS.z=abs(LightPointVS.z);
-        float Radius=PointLightBuffer[i].Range;
-
-        //使用xoz,yoz的投影求交结果最精确
-        bool IsIntersectXoZ=IntersectCircleLadderShaped(LightPointVS.xz,Radius,p1.xz,p2.xz,p5.xz,p6.xz);
-        bool IsIntersectYoZ=IntersectCircleLadderShaped(LightPointVS.yz,Radius,p1.yz,p3.yz,p5.yz,p7.yz);
-        bool IsIntersectFrustum=IsIntersectXoZ && IsIntersectYoZ;
-        //bool IsIntersectFrustum=IntersectAABB(GetAABBfromCluster(GetSphereFrustum(LightPoint,Radius)),GetAABBfromCluster(Box));
+    for(uint i=uint(In.GroupThreadID.z);i<uint(PointLightCount);i+=NumThread_LightIntersection){
+        bool IsIntersectFurstum=IsIntersectSphereFrustum(Box,PointLightBuffer[i]);
         [branch]
-        if(!IsIntersectFrustum){continue;}
-        ValidLightTempBuffer[ValidLightCount++]=i+1;
-        [branch]
-        if(ValidLightCount>7){break;}
+        if(IsIntersectFurstum){
+            uint Index;
+            InterlockedAdd(Gs_ValidLightCount_ThisCluster,1,Index);
+            [branch]
+            if(Index<512){
+                Gs_ValidLightList_ThisCluster[Index]=i;
+            }
+        }
     }
-    uint2 ValidLightBuffer_Encodeed;
-    ValidLightBuffer_Encodeed.x=Encode4ByteTouint32((uint)ValidLightTempBuffer[0],(uint)ValidLightTempBuffer[1],(uint)ValidLightTempBuffer[2],(uint)ValidLightTempBuffer[3]);
-    ValidLightBuffer_Encodeed.y=Encode4ByteTouint32((uint)ValidLightTempBuffer[4],(uint)ValidLightTempBuffer[5],(uint)ValidLightTempBuffer[6],(uint)ValidLightTempBuffer[7]);
-    ValidLightIndex_Buffer[ClusterId_1D]=ValidLightBuffer_Encodeed;
+    GroupMemoryBarrierWithGroupSync();
+    [branch]
+    if(In.GroupIndex==0){
+        InterlockedAdd(GlobalValidLightCount_Buffer[0],Gs_ValidLightCount_ThisCluster,Gs_ValidLightStartOffset);//更新栈指针，Gs_ValidLightStartOffset为更新前的栈指针
+        LightAssignTable[Index3DTo1D(In.GroupID)]=uint2(Gs_ValidLightStartOffset,Gs_ValidLightCount_ThisCluster);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    [loop]
+    for(uint j=uint(In.GroupThreadID.z);j<Gs_ValidLightCount_ThisCluster;j+=NumThread_LightIntersection){
+        GlobalValidLightList[min(GlobalValidLightList_Count,Gs_ValidLightStartOffset+j)]=Gs_ValidLightList_ThisCluster[j];
+    }
 }
 

@@ -1,0 +1,71 @@
+#pragma kernel GetSHCoefficientfromCubeMap
+
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Core.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Input.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_SHLighting.hlsl"
+
+
+Texture2D SkyBoxMap;
+int CubeMapSize;
+float Rotation;
+int MaxMipLevel;
+float Exposure;
+
+SamplerState Trilinear_Repeat;
+SamplerState Point_Clamp;
+
+[numthreads(1,1,1)]
+void GetSHCoefficientfromCubeMap (uint3 id : SV_DispatchThreadID)
+{
+    float3x3 NormalWS_RotateMat=float3x3(cos(Rotation),0.0f,sin(Rotation),
+                                        0.0f,1.0f,0.0f,
+                                        -sin(Rotation),0.0f,cos(Rotation));
+    float3 SH_1,SH_2,SH_3,SH_4,SH_5,SH_6,SH_7,SH_8,SH_9;
+    SH_1=0;
+    SH_2=0;
+    SH_3=0;
+    SH_4=0;
+    SH_5=0;
+    SH_6=0;
+    SH_7=0;
+    SH_8=0;
+    SH_9=0;
+    [loop]
+    for(int w=0;w<CubeMapSize*3;w++){
+        [loop]
+        for(int h=0;h<CubeMapSize*2;h++){
+            float2 uv=float2((float)w/(float)(CubeMapSize*3),(float)h/(float)(CubeMapSize*2));
+            float3 NormalWS=-GetViewDirWSFromCubeMapUv(uv);
+            NormalWS=mul(NormalWS_RotateMat,NormalWS);
+            float3 SamplePoint=SkyBoxMap.SampleLevel(Point_Clamp,uv,MaxMipLevel).xyz;
+            float DifferentialSolidAngle=GetDifferentialSolidAngle(CubeMapSize,uv);
+            float Sh_Value1=SHSample_1(NormalWS);
+            float Sh_Value2=SHSample_2(NormalWS);
+            float Sh_Value3=SHSample_3(NormalWS);
+            float Sh_Value4=SHSample_4(NormalWS);
+            float Sh_Value5=SHSample_5(NormalWS);
+            float Sh_Value6=SHSample_6(NormalWS);
+            float Sh_Value7=SHSample_7(NormalWS);
+            float Sh_Value8=SHSample_8(NormalWS);
+            float Sh_Value9=SHSample_9(NormalWS);
+            SH_1+=SamplePoint*Sh_Value1.xxx*DifferentialSolidAngle;
+            SH_2+=SamplePoint*Sh_Value2.xxx*DifferentialSolidAngle;
+            SH_3+=SamplePoint*Sh_Value3.xxx*DifferentialSolidAngle;
+            SH_4+=SamplePoint*Sh_Value4.xxx*DifferentialSolidAngle;
+            SH_5+=SamplePoint*Sh_Value5.xxx*DifferentialSolidAngle;
+            SH_6+=SamplePoint*Sh_Value6.xxx*DifferentialSolidAngle;
+            SH_7+=SamplePoint*Sh_Value7.xxx*DifferentialSolidAngle;
+            SH_8+=SamplePoint*Sh_Value8.xxx*DifferentialSolidAngle;
+            SH_9+=SamplePoint*Sh_Value9.xxx*DifferentialSolidAngle;
+        }
+    }
+    MainSkyBox_SH[0].SH_1=SH_1*Exposure;
+    MainSkyBox_SH[0].SH_2=SH_2*Exposure;
+    MainSkyBox_SH[0].SH_3=SH_3*Exposure;
+    MainSkyBox_SH[0].SH_4=SH_4*Exposure;
+    MainSkyBox_SH[0].SH_5=SH_5*Exposure;
+    MainSkyBox_SH[0].SH_6=SH_6*Exposure;
+    MainSkyBox_SH[0].SH_7=SH_7*Exposure;
+    MainSkyBox_SH[0].SH_8=SH_8*Exposure;
+    MainSkyBox_SH[0].SH_9=SH_9*Exposure;
+}

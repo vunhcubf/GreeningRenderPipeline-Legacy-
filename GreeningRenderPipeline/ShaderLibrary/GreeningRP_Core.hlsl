@@ -7,24 +7,29 @@
 float Pow2(float a){
     return a*a;
 }
+int Encodefloat32Toint32(float In){
+    return (int)(In*16777216.0f);
+}
+float Decodeint32Tofloat32(int In){
+    return (float)In/16777216.0f;
+}
 float Pow5(float a){
     return Pow4(a)*a;
 }
 float Max4(float a,float b,float c,float d){
     return max(a,max(b,max(c,d)));
 }
-float3x3 GetTangentToWorldMatrix(float3 NormalWS,float3 TangentWS){
-    float3 BiTangentWS=normalize(cross(NormalWS,TangentWS));
+float3x3 GetTangentToWorldMatrix(float3 NormalWS,float3 TangentWS,float3 BiTangentWS){
     return float3x3(TangentWS.x,TangentWS.y,TangentWS.z,
                     BiTangentWS.x,BiTangentWS.y,BiTangentWS.z,
                     NormalWS.x,NormalWS.y,NormalWS.z);
 }
-float3 DecodeNormalMap(float3 TangentWS,float3 NormalWS,float3 NormalMap,float NormalMapIntensity,float ReversedNormalMap){
+float3 DecodeNormalMap(float3 TangentWS,float3 NormalWS,float3 BiNormalWS,float3 NormalMap,float NormalMapIntensity,float ReversedNormalMap){
     NormalMap=NormalMap*2.0f-1.0f;
     //NormalMap=NormalMap.yzx;
     NormalMap.xy*=NormalMapIntensity*(ReversedNormalMap*2.0f-1.0f);
-    NormalMap.z=max(sqrt(1.0f-dot(NormalMap.xy,NormalMap.xy)),1e-4f);
-    return normalize(mul(NormalMap,GetTangentToWorldMatrix(NormalWS,TangentWS)));
+    NormalMap.z=sqrt(1.01f-dot(NormalMap.xy,NormalMap.xy));
+    return SafeNormalize(mul(NormalMap,GetTangentToWorldMatrix(NormalWS,TangentWS,BiNormalWS)));
 }
 float3 PackOctNormal(float3 n){
     float2 octNormalWS = PackNormalOctQuadEncode(n);                  // values between [-1, +1], must use fp32 on some platforms.
@@ -35,7 +40,7 @@ float3 UnpackNormal(float3 pn)
 {
     float2 remappedOctNormalWS = float2(Unpack888ToFloat2(pn));          // values between [ 0, +1]
     float2 octNormalWS = remappedOctNormalWS.xy * float(2.0) - float(1.0);// values between [-1, +1]
-    return normalize(float3(UnpackNormalOctQuadEncode(octNormalWS)));              // values between [-1, +1]
+    return SafeNormalize(float3(UnpackNormalOctQuadEncode(octNormalWS)));              // values between [-1, +1]
 }
 float LinearEyeDepth(float z){
     return (FarClipPlane*NearClipPlane)/((FarClipPlane-NearClipPlane)*z+NearClipPlane);

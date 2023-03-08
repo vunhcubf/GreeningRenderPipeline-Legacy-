@@ -29,7 +29,7 @@ namespace UnityEngine.Rendering.GreeningRP
 
         private AmbientOcclusion.RenderPass ao;
 
-        private RenderTexture DefferedShading_Dest_RT;
+        private RenderTexture RT_CameraTargetTexture_HDR;
 
         private int Width;
         private int Height;
@@ -60,6 +60,7 @@ namespace UnityEngine.Rendering.GreeningRP
             Cmd_RenderPrepare.Clear();
             Cmd_RenderPrepare.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             Cmd_RenderPrepare.ClearRenderTarget(true, true, new Color(0.0f, 1.0f, 1.0f));
+
             context.ExecuteCommandBuffer(Cmd_RenderPrepare);
             context.Submit();
 
@@ -77,16 +78,16 @@ namespace UnityEngine.Rendering.GreeningRP
             }
 
             //初始化渲染纹理
-            if (DefferedShading_Dest_RT is null)
+            if (RT_CameraTargetTexture_HDR is null)
             {
-                DefferedShading_Dest_RT = RenderTexture.GetTemporary(Width, Height, 0, RenderTextureFormat.DefaultHDR);
-                DefferedShading_Dest_RT.enableRandomWrite = true;
+                RT_CameraTargetTexture_HDR = RenderTexture.GetTemporary(Width, Height, 0, GraphicsFormat.B10G11R11_UFloatPack32);
+                RT_CameraTargetTexture_HDR.enableRandomWrite = true;
             }
-            if(DefferedShading_Dest_RT.width!=Width || DefferedShading_Dest_RT.height != Height)
+            if(RT_CameraTargetTexture_HDR.width!=Width || RT_CameraTargetTexture_HDR.height != Height)
             {
-                RenderTexture.ReleaseTemporary(DefferedShading_Dest_RT);
-                DefferedShading_Dest_RT = RenderTexture.GetTemporary(Width, Height, 0, RenderTextureFormat.DefaultHDR);
-                DefferedShading_Dest_RT.enableRandomWrite = true;
+                RenderTexture.ReleaseTemporary(RT_CameraTargetTexture_HDR);
+                RT_CameraTargetTexture_HDR = RenderTexture.GetTemporary(Width, Height, 0, GraphicsFormat.B10G11R11_UFloatPack32);
+                RT_CameraTargetTexture_HDR.enableRandomWrite = true;
             }
 
             //绘制GBuffer
@@ -99,14 +100,14 @@ namespace UnityEngine.Rendering.GreeningRP
 
             //进行延迟着色
             DefferedShading();
-            Cmd_Debug.Blit(DefferedShading_Dest_RT, BuiltinRenderTextureType.CameraTarget);
+
+            //绘制天空球
+            DrawSkyBox();
+
+            Cmd_Debug.Blit(RT_CameraTargetTexture_HDR, BuiltinRenderTextureType.CameraTarget);
             context.ExecuteCommandBuffer(Cmd_Debug);
             context.Submit();
 
-
-            ////绘制天空球
-            //context.DrawSkybox(MainCamera);
-            //context.Submit();
             //绘制Gizmos
             if (Handles.ShouldRenderGizmos())
             {
@@ -123,8 +124,6 @@ namespace UnityEngine.Rendering.GreeningRP
                 ao.OnRenderCleanup(context, MainCamera);
             }
 
-            
-
             //释放指令缓冲
             CommandBufferPool.Release(Cmd_Debug);
             CommandBufferPool.Release(Cmd_RenderPrepare);
@@ -133,14 +132,16 @@ namespace UnityEngine.Rendering.GreeningRP
             //释放computebuffer
             PointLightBuffer.Dispose();
             DirectionalLightBuffer.Dispose();
+            SpotLightBuffer.Dispose();
             if (UseClusterLight)
             {
-                ClusterBox_Buffer.Dispose();
-                ValidLightIndex_Buffer.Dispose();
+                LightAssignTable.Dispose();
+                GlobalValidLightCount_Buffer.Dispose();
+                GlobalValidLightList.Dispose();
             }
             
         }
-        public GreeningRenderPipeline(GreeningRenderPipelineAsset.SprSettings srp_settings, GlobalilluminationSettings gi_settings, ShaderResource shader_resources, LightSetting light_settings)
+        public GreeningRenderPipeline(GreeningRenderPipelineAsset.SprSettings srp_settings, GlobalilluminationSettings gi_settings, ShaderResource shader_resources, LightSetting light_settings, SkyBoxSetting SkyBoxSettings)
         {
             Debug.Log("创建渲染管线");
             this.srp_settings = srp_settings;
@@ -155,6 +156,10 @@ namespace UnityEngine.Rendering.GreeningRP
             NumClusterX = light_settings.NumClusterXYZ.x;
             NumClusterY = light_settings.NumClusterXYZ.y;
             NumClusterZ = light_settings.NumClusterXYZ.z;
+            this.AverageOverlapLightCountPerCluster = light_settings.AverageOverlapLightCountPerCluster;
+            this.DebugLightCount = light_settings.DebugLightCount;
+            this.skybox_settings = SkyBoxSettings;
+            InitializePreComputeData(SkyBoxSettings, shader_resources, light_settings);
         }
         
     }

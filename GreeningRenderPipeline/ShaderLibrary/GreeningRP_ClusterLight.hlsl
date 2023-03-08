@@ -3,6 +3,7 @@
 
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Core.hlsl"
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Input.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Lighting.hlsl"
 
 struct ClusterBox{
     float3 p1;
@@ -23,7 +24,7 @@ struct AABB{
 ClusterBox GetSphereFrustum(float3 PositionWS,float Range){
     float3 D=mul(World2View_Matrix,float4(PositionWS,1.0f)).xyz;
     float r=Range;
-    D.z=abs(D.z);
+    D.z=-D.z;
     float Far=D.z+Range;
     float Near=D.z-Range;
 
@@ -99,37 +100,6 @@ ClusterBox GetSphereFrustum(float3 PositionWS,float Range){
     Box.p8=mul(View2World_Matrix,float4(p8,1.0f)).xyz;
     return Box;
 }
-
-// //目前还有问题
-// //其中线段p3p4平行线段p1p2,p3p4为远平面上的点,p1p2为近平面上的点
-// bool IsPointInQuadrilateral(float2 Point,float2 p1,float2 p2,float2 p3,float2 p4){
-//     float FarNear_Interpolation=(Point.y-p2.y)/(p4.y-p2.y);
-//     bool IsInNear_Far=0.0f<FarNear_Interpolation && FarNear_Interpolation<1.0f;
-//     float Left=lerp(p1.x,p3.x,FarNear_Interpolation);
-//     float Right=lerp(p2.x,p4.x,FarNear_Interpolation);
-//     bool IsInLeft_Right=Left<Point.x && Point.x<Right;
-//     return IsInLeft_Right && IsInNear_Far;
-// }
-
-// //目前还有问题
-// //其中线段p3p4平行线段p1p2,p3p4为远平面上的点,p1p2为近平面上的点
-// bool IntersectCircleLadderShaped(float2 CircleCenter,float Range,float2 p1,float2 p2,float2 p3,float2 p4){
-//     float2 p3p1=p3-p1;
-//     float2 p1p3Normal=normalize(float2(-p3p1.y,p3p1.x));
-//     float2 VectorLeft=float2(-1.0f,0.0f);
-//     VectorLeft=Range*VectorLeft/abs(dot(VectorLeft,p1p3Normal));
-//     float2 p3_prime=VectorLeft+p3+Range*p3p1/p3p1.y;
-//     float2 p1_prime=VectorLeft+p1-Range*p3p1/p3p1.y;
-
-//     float2 p4p2=p4-p2;
-//     float2 p2p4Normal=normalize(float2(p4p2.y,-p4p2.x));
-//     float2 VectorRight=float2(1.0f,0.0f);
-//     VectorRight=Range*VectorRight/abs(dot(VectorRight,p2p4Normal));
-//     float2 p2_prime=VectorRight+p2-Range*p4p2/p4p2.y;
-//     float2 p4_prime=VectorRight+p4+Range*p4p2/p4p2.y;
-
-//     return IsPointInQuadrilateral(CircleCenter,p1_prime,p2_prime,p3_prime,p4_prime);
-// }
 
 float PointToPlaneDistance(float3 Point,float3 PlanePoint1,float3 PlanePoint2,float3 PlanePoint3){
     float3 Vec=PlanePoint1-Point;
@@ -235,6 +205,10 @@ bool IntersectCircleLadderShaped(float2 Center,float Range,float2 p1,float2 p2,f
     float2 BoundingSphereCenter=(p1+p2+p3+p4)*0.25f.xx;
     float BoundingSphereRadius=Max4(length(p1-BoundingSphereCenter),length(p2-BoundingSphereCenter),length(p3-BoundingSphereCenter),length(p4-BoundingSphereCenter));
     bool IsInBoundingSphere=length(BoundingSphereCenter-Center)<Range+BoundingSphereRadius;
+    [branch]
+    if(!IsInBoundingSphere){
+        return false;
+    }
     //判断光源是否在梯形内
     float FarNearInterpolationRatio=(Center.y-p2.y)/(p4.y-p2.y);
     bool IsInFarNear=0.0f<FarNearInterpolationRatio && FarNearInterpolationRatio<1.0f;
@@ -245,10 +219,7 @@ bool IntersectCircleLadderShaped(float2 Center,float Range,float2 p1,float2 p2,f
     if(IsInLeftRight && IsInFarNear){
         return true;
     }
-    [branch]
-    if(!IsInBoundingSphere){
-        return false;
-    }
+    
     //和四个角的球求交
     bool IsInSphere_p1=length(Center-p1)<Range;
     bool IsInSphere_p2=length(Center-p2)<Range;
@@ -291,5 +262,36 @@ int4 Decodeuint32To4Byte(uint a)
     Out.z = (int)c_prime;
     Out.w = (int)d_prime;
     return Out;
+}
+bool IsIntersectSphereFrustum(ClusterBox Box,PointLight One){
+    float3 p1=mul(World2View_Matrix,float4(Box.p1,1.0f)).xyz;
+    float3 p2=mul(World2View_Matrix,float4(Box.p2,1.0f)).xyz;
+    float3 p3=mul(World2View_Matrix,float4(Box.p3,1.0f)).xyz;
+    float3 p4=mul(World2View_Matrix,float4(Box.p4,1.0f)).xyz;
+    float3 p5=mul(World2View_Matrix,float4(Box.p5,1.0f)).xyz;
+    float3 p6=mul(World2View_Matrix,float4(Box.p6,1.0f)).xyz;
+    float3 p7=mul(World2View_Matrix,float4(Box.p7,1.0f)).xyz;
+    float3 p8=mul(World2View_Matrix,float4(Box.p8,1.0f)).xyz;
+
+    p1.z=-1.0f*p1.z;
+    p2.z=-1.0f*p2.z;
+    p3.z=-1.0f*p3.z;
+    p4.z=-1.0f*p4.z;
+    p5.z=-1.0f*p5.z;
+    p6.z=-1.0f*p6.z;
+    p7.z=-1.0f*p7.z;
+    p8.z=-1.0f*p8.z;
+
+    float3 LightPoint=One.PositionWS;
+    float3 LightPointVS=mul(World2View_Matrix,float4(LightPoint,1.0f)).xyz;
+    LightPointVS.z=-1.0f*LightPointVS.z;
+    float Radius=One.Range;
+
+    //使用xoz,yoz的投影求交结果最精确
+    bool IsIntersectXoZ=IntersectCircleLadderShaped(LightPointVS.xz,Radius,p1.xz,p2.xz,p5.xz,p6.xz);
+    bool IsIntersectYoZ=IntersectCircleLadderShaped(LightPointVS.yz,Radius,p1.yz,p3.yz,p5.yz,p7.yz);
+    bool IsIntersectFrustum=IsIntersectXoZ && IsIntersectYoZ;
+    //bool IsIntersectFrustum=IntersectAABB(GetAABBfromCluster(GetSphereFrustum(LightPoint,Radius)),GetAABBfromCluster(Box));
+    return IsIntersectFrustum;
 }
 #endif

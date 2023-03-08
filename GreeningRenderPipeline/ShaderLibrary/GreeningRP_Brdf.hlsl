@@ -47,11 +47,11 @@ float3 SpecularGGX( float Roughness, float3 SpecularColor, BxDFContext Context)
 BxDFContext BxDFContext_Init(float3 N,float3 V,float3 L){
 	BxDFContext Out;
 	float3 H=normalize(V+L);
-	Out.NoV=saturate(dot(N,V)+1e-5);
-	Out.NoL=saturate(dot(N,L)+1e-5);
-	Out.VoL=saturate(dot(V,L));
-	Out.NoH=saturate(dot(N,H));
-	Out.VoH=saturate(dot(V,H));
+	Out.NoV=saturate(dot(N,V))+1e-6f;
+	Out.NoL=saturate(dot(N,L))+1e-6f;
+	Out.VoL=saturate(dot(V,L))+1e-6f;
+	Out.NoH=saturate(dot(N,H))+1e-6f;
+	Out.VoH=saturate(dot(V,H))+1e-6f;
 	return Out;
 }
 /////////////////////

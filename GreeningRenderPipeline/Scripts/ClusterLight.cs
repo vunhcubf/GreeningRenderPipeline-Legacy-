@@ -15,12 +15,15 @@ namespace UnityEngine.Rendering.GreeningRP
 {
     public partial class GreeningRenderPipeline
     {
+        private uint AverageOverlapLightCountPerCluster;
+        bool DebugLightCount;
         int NumClusterX = 16;
         int NumClusterY = 16;
         int NumClusterZ = 32;
         bool UseClusterLight;
-        ComputeBuffer ClusterBox_Buffer;
-        ComputeBuffer ValidLightIndex_Buffer;
+        ComputeBuffer GlobalValidLightList;
+        ComputeBuffer GlobalValidLightCount_Buffer;//所有cluster总共可用的灯光数量，使用computebuffer来在所有的线程组间通信,相当于栈指针
+        ComputeBuffer LightAssignTable;
         struct ClusterBox
         {
             public float3 p1;
@@ -36,23 +39,37 @@ namespace UnityEngine.Rendering.GreeningRP
         {
             ComputeShader ClusterLight_Shader = shader_resources.ClusterLight_Shader;
             
-            int GetCluster_Pass = ClusterLight_Shader.FindKernel("GetCluster");
             int ClusterIntersect = ClusterLight_Shader.FindKernel("ClusterIntersect");
 
             ClusterLight_Shader.SetInt("NumClusterX", NumClusterX);
             ClusterLight_Shader.SetInt("NumClusterY", NumClusterY);
             ClusterLight_Shader.SetInt("NumClusterZ", NumClusterZ);
 
-            ClusterLight_Shader.SetBuffer(GetCluster_Pass, "PointLightPropertiesList", PointLightBuffer);
-            ClusterBox_Buffer = new ComputeBuffer(NumClusterX* NumClusterY* NumClusterZ,8*3*4);
-            ValidLightIndex_Buffer = new ComputeBuffer(NumClusterX * NumClusterY * NumClusterZ,4*2);
-            ClusterLight_Shader.SetBuffer(GetCluster_Pass, "ClusterBox_Buffer", ClusterBox_Buffer);
-            ClusterLight_Shader.Dispatch(GetCluster_Pass, NumClusterX / 8, NumClusterY / 8, NumClusterZ / 8);
+            GlobalValidLightCount_Buffer = new ComputeBuffer(1,4);
+            GlobalValidLightList = new ComputeBuffer((int)AverageOverlapLightCountPerCluster* NumClusterX * NumClusterY * NumClusterZ, 4);
+            LightAssignTable = new ComputeBuffer(NumClusterX * NumClusterY * NumClusterZ,4*2);
 
-            ClusterLight_Shader.SetBuffer(ClusterIntersect, "ValidLightIndex_Buffer", ValidLightIndex_Buffer);
-            ClusterLight_Shader.SetBuffer(ClusterIntersect, "ClusterBox_Buffer", ClusterBox_Buffer);
+            GlobalValidLightCount_Buffer.SetData(new uint[1]{1});
+
+            ClusterLight_Shader.SetInt("GlobalValidLightList_Count", (int)AverageOverlapLightCountPerCluster * NumClusterX * NumClusterY * NumClusterZ);
+            ClusterLight_Shader.SetBuffer(ClusterIntersect, "GlobalValidLightCount_Buffer", GlobalValidLightCount_Buffer);
+            ClusterLight_Shader.SetBuffer(ClusterIntersect, "GlobalValidLightList", GlobalValidLightList);
+            ClusterLight_Shader.SetBuffer(ClusterIntersect, "LightAssignTable", LightAssignTable);
             ClusterLight_Shader.SetBuffer(ClusterIntersect, "PointLightBuffer", PointLightBuffer);
-            ClusterLight_Shader.Dispatch(ClusterIntersect, NumClusterX / 8, NumClusterY / 8, NumClusterZ / 8);
+            ClusterLight_Shader.Dispatch(ClusterIntersect, NumClusterX, NumClusterY, NumClusterZ);
+
+            if (DebugLightCount)
+            {
+                int[] GlobalValidLightCount = new int[1];
+                GlobalValidLightCount_Buffer.GetData(GlobalValidLightCount);
+                Debug.Log("全局有效灯光数量:" + GlobalValidLightCount[0]);
+                Debug.Log("平均每cluster灯光数量:" + (float)GlobalValidLightCount[0] / (float)(NumClusterX * NumClusterY * NumClusterZ));
+                Debug.Log("全局灯光列表使用率:"+ 100f*(float)GlobalValidLightCount[0]/ (float)(NumClusterX * NumClusterY * NumClusterZ* (int)AverageOverlapLightCountPerCluster)+"%");
+            }
+        }
+        int Index3DTo1D(int3 id)
+        {
+            return id.z * NumClusterX * NumClusterY + id.y * NumClusterX + id.x;
         }
         void DrawBox(ClusterBox Box ,Color color)
         {
@@ -70,53 +87,6 @@ namespace UnityEngine.Rendering.GreeningRP
             Debug.DrawLine(Box.p4, Box.p8, color, 0.05f);
             Debug.DrawLine(Box.p1, Box.p5, color, 0.05f);
             Debug.DrawLine(Box.p2, Box.p6, color, 0.05f);
-        }
-        void DrawCluster()
-        {
-            ClusterBox[] A=new ClusterBox[NumClusterX * NumClusterY * NumClusterZ];
-            ClusterBox_Buffer.GetData(A);
-            foreach (var one in A)
-            {
-                DrawBox(one,Color.white);
-            }
-        }
-        void DrawIntersectCluster()
-        {
-            uint2[] A = new uint2[NumClusterX * NumClusterY * NumClusterZ];
-
-            ClusterBox[] B = new ClusterBox[NumClusterX * NumClusterY * NumClusterZ];
-            ClusterBox_Buffer.GetData(B);
-            ValidLightIndex_Buffer.GetData(A);
-            for(int i=0;i< NumClusterX * NumClusterY * NumClusterZ; i++)
-            {
-                int[] ValidLight_Buffer_OneCluster = new int[8];
-                int4 Decode_1 = Decodeuint32To4Byte(A[i].x);
-                int4 Decode_2 = Decodeuint32To4Byte(A[i].y);
-                ValidLight_Buffer_OneCluster[0] = Decode_1.x;
-                ValidLight_Buffer_OneCluster[1] = Decode_1.y;
-                ValidLight_Buffer_OneCluster[2] = Decode_1.z;
-                ValidLight_Buffer_OneCluster[3] = Decode_1.w;
-                ValidLight_Buffer_OneCluster[4] = Decode_2.x;
-                ValidLight_Buffer_OneCluster[5] = Decode_2.y;
-                ValidLight_Buffer_OneCluster[6] = Decode_2.z;
-                ValidLight_Buffer_OneCluster[7] = Decode_2.w;
-                if (IsContainSpecificLightIndex(1, ValidLight_Buffer_OneCluster))
-                {
-                    DrawBox(B[i], Color.red);
-                }
-                if (IsContainSpecificLightIndex(2, ValidLight_Buffer_OneCluster))
-                {
-                    DrawBox(B[i], Color.blue);
-                }
-                if (IsContainSpecificLightIndex(3, ValidLight_Buffer_OneCluster))
-                {
-                    DrawBox(B[i], Color.green);
-                }
-                if (IsContainSpecificLightIndex(4, ValidLight_Buffer_OneCluster))
-                {
-                    DrawBox(B[i], Color.yellow);
-                }
-            }
         }
         bool IsContainSpecificLightIndex(int LightIndex, int[] ValidLight_Buffer_OneCluster)
         {

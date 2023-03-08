@@ -4,22 +4,18 @@
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Brdf.hlsl"
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Lighting.hlsl"
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_ClusterLight.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_EnvironmentLighting.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_SHLighting.hlsl"
 
 
 RWTexture2D<float4> DefferedShading_Dest;
-// #if defined CLUSTER_LIGHT
-RWStructuredBuffer<uint2> ValidLightIndex_Buffer;
+#if defined CLUSTER_LIGHT
+RWStructuredBuffer<uint> GlobalValidLightList;
+RWStructuredBuffer<uint2> LightAssignTable;
 int NumClusterX;
 int NumClusterY;
 int NumClusterZ;
 bool UseClusterLight;
-// #endif
-
-Texture2D GBuffer0;
-Texture2D GBuffer1;
-Texture2D GBuffer2;
-Texture2D SceneDepth;
-
 int Index3DTo1D(int3 id3){
     return id3.z*NumClusterX*NumClusterY+id3.y*NumClusterX+id3.x;
 }
@@ -32,6 +28,12 @@ int3 GetCluster(float3 NdcPos){
     int3 id=(int3)floor(Pos);
     return id;
 }
+#endif
+
+Texture2D GBuffer0;
+Texture2D GBuffer1;
+Texture2D GBuffer2;
+Texture2D SceneDepth;
 
 void DecodeGBuffer(int2 id,out float Roughness,out float Metallic,out float3 BaseColor,out float3 NormalWS,out float Occlusion){
     float4 GBuffer0_Data=GBuffer0.Load(int3(id.xy,0)).xyzw;
@@ -43,9 +45,6 @@ void DecodeGBuffer(int2 id,out float Roughness,out float Metallic,out float3 Bas
     Metallic=GBuffer2_Data.y;
     NormalWS=UnpackNormal(GBuffer1_Data.xyz);
 }
-
-
-
 [numthreads(8,8,1)]
 void DefferedShading (uint3 id : SV_DispatchThreadID)
 {
@@ -76,33 +75,42 @@ void DefferedShading (uint3 id : SV_DispatchThreadID)
         }
     }
 
+    //处理聚光灯
+    [branch]
+    if(IsAnySpotLight){
+        [loop]
+        for(int i=0;i<SpotLightCount;i++){
+            float3 Direction=GetSpotLight_Direction(i);
+            float3 LightDir=GetSpotLight_LightDir(i,PositionWS);
+            float2 SpotLightAttenuation=GetSpotLight_AttenuationParams(i);
+            float3 Color=GetSpotLight_Color(i);
+            float AngleAttenuation=saturate(dot(Direction,LightDir)*SpotLightAttenuation.x+SpotLightAttenuation.y);
+            AngleAttenuation=smoothstep(0.0f,1.0f,AngleAttenuation);
+            AngleAttenuation=Pow2(AngleAttenuation);
+            float DistanceAttenuation=GetSpotLight_DistanceAttenuation(i,PositionWS);
+            float LightAttenuation=DistanceAttenuation*AngleAttenuation;
+            float3 LightRadiance=Color*LightAttenuation;
+
+            BxDFContext Context=BxDFContext_Init(NormalWS,ViewDirWS,LightDir);
+            FinalColor+=LightRadiance*Brdf_Diffuse_Specular(BaseColor,Roughness,Metallic,Context).xyz;
+        }
+    }
+
     //处理点光
     #if defined CLUSTER_LIGHT
     int3 Cluster_Id=GetCurCluster(uv,NdcDepth,NumClusterX,NumClusterY,NumClusterZ);
     int Cluster_Id_1D=Index3DTo1D(Cluster_Id);
-    int4 Decode_1=Decodeuint32To4Byte(ValidLightIndex_Buffer[Cluster_Id_1D].x);
-    int4 Decode_2=Decodeuint32To4Byte(ValidLightIndex_Buffer[Cluster_Id_1D].y);
-    int LightIndex[8];
-    LightIndex[0]=Decode_1.x;
-    LightIndex[1]=Decode_1.y;
-    LightIndex[2]=Decode_1.z;
-    LightIndex[3]=Decode_1.w;
-    LightIndex[4]=Decode_2.x;
-    LightIndex[5]=Decode_2.y;
-    LightIndex[6]=Decode_2.z;
-    LightIndex[7]=Decode_2.w;
+    uint2 GlobalLightStackInfo=LightAssignTable[Cluster_Id_1D];
     [branch]
     if(IsAnyPointLight){
         [loop]
-        for(int j=0;j<8;j++){
-            [branch]
-            if(LightIndex[j]!=0){
-                float3 LightDir=GetPointLight_Direction(LightIndex[j]-1,PositionWS);
-                float3 LightColor=GetPointLight_Color(LightIndex[j]-1);
-                float DistanceAttenuation=GetPointLight_DistanceAttenuation(LightIndex[j]-1,PositionWS);
-                BxDFContext Context=BxDFContext_Init(NormalWS,ViewDirWS,LightDir);
-                FinalColor+=DistanceAttenuation*LightColor*Brdf_Diffuse_Specular(BaseColor,Roughness,Metallic,Context).xyz;
-            }
+        for(uint i=GlobalLightStackInfo.x;i<GlobalLightStackInfo.x+GlobalLightStackInfo.y;i++){
+            uint LigthIndex=GlobalValidLightList[i];
+            float3 LightDir=GetPointLight_Direction(LigthIndex,PositionWS);
+            float3 LightColor=GetPointLight_Color(LigthIndex);
+            float DistanceAttenuation=GetPointLight_DistanceAttenuation(LigthIndex,PositionWS);
+            BxDFContext Context=BxDFContext_Init(NormalWS,ViewDirWS,LightDir);
+            FinalColor+=DistanceAttenuation*LightColor*Brdf_Diffuse_Specular(BaseColor,Roughness,Metallic,Context).xyz;
         }
     }
     #else
@@ -110,7 +118,6 @@ void DefferedShading (uint3 id : SV_DispatchThreadID)
     if(IsAnyPointLight){
         [loop]
         for(int j=0;j<PointLightCount;j++){
-            [branch]
             float3 LightDir=GetPointLight_Direction(j,PositionWS);
             float3 LightColor=GetPointLight_Color(j);
             float DistanceAttenuation=GetPointLight_DistanceAttenuation(j,PositionWS);
@@ -119,6 +126,8 @@ void DefferedShading (uint3 id : SV_DispatchThreadID)
         }
     }
     #endif
-    
+
+    //混合漫反射GI
+    FinalColor+=(1.0f-Metallic).xxx*GetSHLighting(NormalWS)*BaseColor/PI;
     DefferedShading_Dest[id.xy] = FinalColor.xyzz;
 }

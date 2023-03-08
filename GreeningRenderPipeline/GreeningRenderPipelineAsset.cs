@@ -28,6 +28,10 @@ namespace UnityEngine.Rendering.GreeningRP
             public ComputeShader DefferedShading_Shader;
             [Header("分簇光照shader")]
             public ComputeShader ClusterLight_Shader;
+            [Header("天空盒shader")]
+            public ComputeShader SkyBox_Shader;
+            [Header("IBL间接光照shader")]
+            public ComputeShader IBL_Shader;
         }
         [System.Serializable]
         public class LightSetting
@@ -35,11 +39,30 @@ namespace UnityEngine.Rendering.GreeningRP
             [Header("分簇光照设置")]
             public bool UseClusterLight;
             public int3 NumClusterXYZ=new int3(16,16,32);
+            public uint AverageOverlapLightCountPerCluster = 20;
+            public bool DebugLightCount=true;
+        }
+        [System.Serializable]
+        public class SkyBoxSetting
+        {
+            public Texture2D SkyBoxMap;
+            public enum SkyBoxtype
+            {
+                Panomanic,
+                CubeMap
+            };
+            public SkyBoxtype SkyBoxType;
+            [Range(0f,2f)]
+            public float Exposure = 1f;
+            [Range(0f, 360f)]
+            public float Rotation = 0f;
         }
         [Header("依赖的着色器资源")]
         public ShaderResource ShaderResources = new ShaderResource();
         [Header("光照设置")]
         public LightSetting LightSettings = new LightSetting();
+        [Header("天空盒设置")]
+        public SkyBoxSetting SkyBoxSettings=new SkyBoxSetting();
         [Header("Srp设置")]
         public SprSettings Srp = new SprSettings();
         [Space(15)]
@@ -47,7 +70,7 @@ namespace UnityEngine.Rendering.GreeningRP
         public GlobalilluminationSettings Globalillumination = new GlobalilluminationSettings();
         protected override RenderPipeline CreatePipeline()
         {
-            return new GreeningRenderPipeline(Srp, Globalillumination, ShaderResources, LightSettings);
+            return new GreeningRenderPipeline(Srp, Globalillumination, ShaderResources, LightSettings, SkyBoxSettings);
         }
     }
 }

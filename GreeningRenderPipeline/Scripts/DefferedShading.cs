@@ -21,19 +21,24 @@ namespace UnityEngine.Rendering.GreeningRP
             ComputeShader DefferedShading_Shader = shader_resources.DefferedShading_Shader;
             int Kernel_Main = DefferedShading_Shader.FindKernel("DefferedShading");
             
-            DefferedShading_Shader.SetTexture(Kernel_Main,"DefferedShading_Dest", DefferedShading_Dest_RT);
+            DefferedShading_Shader.SetTexture(Kernel_Main,"DefferedShading_Dest", RT_CameraTargetTexture_HDR);
             DefferedShading_Shader.SetBool("IsAnyPointLight", IsAnyPointLight);
             DefferedShading_Shader.SetBuffer(Kernel_Main, "PointLightPropertiesList", PointLightBuffer);
             DefferedShading_Shader.SetBool("IsAnyDirectionalLight", IsAnyDirectionalLight);
             DefferedShading_Shader.SetBuffer(Kernel_Main, "DirectionalLightPropertiesList", DirectionalLightBuffer);
-            
+            DefferedShading_Shader.SetBool("IsAnySpotLight", IsAnySpotLight);
+            DefferedShading_Shader.SetBuffer(Kernel_Main, "SpotLightPropertiesList", SpotLightBuffer);
+
+            DefferedShading_Shader.SetBuffer(Kernel_Main, "MainSkyBox_SH", MainSkyBox_SH);
+
             if (UseClusterLight)
             {
                 Shader.EnableKeyword("CLUSTER_LIGHT");
                 DefferedShading_Shader.SetInt("NumClusterX", NumClusterX);
                 DefferedShading_Shader.SetInt("NumClusterY", NumClusterY);
                 DefferedShading_Shader.SetInt("NumClusterZ", NumClusterZ);
-                DefferedShading_Shader.SetBuffer(Kernel_Main, "ValidLightIndex_Buffer", ValidLightIndex_Buffer);
+                DefferedShading_Shader.SetBuffer(Kernel_Main, "GlobalValidLightList", GlobalValidLightList);
+                DefferedShading_Shader.SetBuffer(Kernel_Main, "LightAssignTable", LightAssignTable);
             }
             else
             {
@@ -41,7 +46,7 @@ namespace UnityEngine.Rendering.GreeningRP
             }
             
 
-            DefferedShading_Shader.Dispatch(Kernel_Main, Width/8,Height/8,1);
+            DefferedShading_Shader.Dispatch(Kernel_Main, 1+Width/8,1+Height/8,1);
         }
     }
 }
