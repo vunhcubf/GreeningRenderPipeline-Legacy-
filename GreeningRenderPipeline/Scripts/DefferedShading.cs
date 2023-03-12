@@ -15,7 +15,6 @@ namespace UnityEngine.Rendering.GreeningRP
 {
     public partial class GreeningRenderPipeline
     {
-        
         private void DefferedShading()
         {
             ComputeShader DefferedShading_Shader = shader_resources.DefferedShading_Shader;
@@ -29,7 +28,9 @@ namespace UnityEngine.Rendering.GreeningRP
             DefferedShading_Shader.SetBool("IsAnySpotLight", IsAnySpotLight);
             DefferedShading_Shader.SetBuffer(Kernel_Main, "SpotLightPropertiesList", SpotLightBuffer);
 
-            DefferedShading_Shader.SetBuffer(Kernel_Main, "MainSkyBox_SH", MainSkyBox_SH);
+            Shader.SetGlobalTexture("Brdf_Lut", shader_resources.BrdfLut);
+            DefferedShading_Shader.SetTexture(Kernel_Main, "SkyBoxMap", skybox_settings.SkyBoxMap);
+            Shader.SetGlobalInt("SkyBoxMap_MaxMipLevel", skybox_settings.SkyBoxMap.mipmapCount);
 
             if (UseClusterLight)
             {

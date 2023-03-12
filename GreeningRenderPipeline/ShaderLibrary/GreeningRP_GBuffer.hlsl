@@ -19,6 +19,7 @@ cbuffer UnityPerMaterial{
     float Metallic_Multiplier;
     float4 BaseColor_Tint;
     float ReversedNormalMap;
+    float UseNormalMap;
 };
 struct VertexInput_GBuffer{
     float4 PositionOS:POSITION;
@@ -65,7 +66,13 @@ GBufferOutput Frag_GBuffer(VertexOutput_GBuffer i){
     float3 TangentWS=normalize(i.TangentWS);
     float3 BiNormalWS=normalize(i.BiNormalWS);
     float3 NormalMap_Data=tex2D(NormalMap,Transform_Tex(uv,BaseColorMap_ST)).xyz;
-    NormalWS=DecodeNormalMap(TangentWS,NormalWS,BiNormalWS,NormalMap_Data,NormalMap_Intensity,ReversedNormalMap);
+    [flatten]
+    if(UseNormalMap==1.0f){
+        NormalWS=DecodeNormalMap(TangentWS,NormalWS,BiNormalWS,NormalMap_Data,NormalMap_Intensity,ReversedNormalMap);
+    }
+    else{
+        NormalWS=NormalWS;
+    }
 
     float3 BaseColor=BaseColor_Tint.xyz*tex2D(BaseColorMap,Transform_Tex(uv,BaseColorMap_ST)).xyz;
     float Occlusion=saturate(pow(saturate(tex2D(OcclusionMap,Transform_Tex(uv,BaseColorMap_ST)).x),OcclusionMap_Intensity));

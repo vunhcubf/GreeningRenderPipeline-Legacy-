@@ -1,0 +1,70 @@
+#pragma kernel ClusterIntersect
+
+
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Core.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Input.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_ClusterLight.hlsl"
+#define NumThread_LightIntersection 16
+int NumClusterX;
+int NumClusterY;
+int NumClusterZ;
+int GlobalValidLightList_Count;
+
+struct ComputeShaderInput
+{
+	uint3 GroupID           : SV_GroupID;           // 3D index of the thread group in the dispatch.
+	uint3 GroupThreadID     : SV_GroupThreadID;     // 3D index of local thread ID in a thread group.
+	uint3 DispatchThreadID  : SV_DispatchThreadID;  // 3D index of global thread ID in the dispatch.
+	uint  GroupIndex        : SV_GroupIndex;        // Flattened local index of the thread within a thread group.
+};
+
+RWStructuredBuffer<PointLight> PointLightBuffer;
+RWStructuredBuffer<uint2> LightAssignTable;
+RWStructuredBuffer<uint> GlobalValidLightList;//全局灯光栈
+RWStructuredBuffer<uint> GlobalValidLightCount_Buffer;//相当于栈指针
+
+groupshared ClusterBox Box;
+groupshared uint Gs_ValidLightCount_ThisCluster;
+groupshared uint Gs_ValidLightList_ThisCluster[512];
+groupshared uint Gs_ValidLightStartOffset;
+groupshared uint Gs_ValidLightCount;
+
+uint Index3DTo1D(uint3 id){
+    return id.z*NumClusterX*NumClusterY + id.y*NumClusterX +id.x;
+}
+[numthreads(1,1,NumThread_LightIntersection)]
+void ClusterIntersect (ComputeShaderInput In)
+{
+    [branch]
+    if(In.GroupIndex==0){
+        Box=GetClusterFrustum(In.GroupID,NumClusterX,NumClusterY,NumClusterZ);
+        Gs_ValidLightCount_ThisCluster=0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    [loop]
+    for(uint i=uint(In.GroupThreadID.z);i<uint(PointLightCount);i+=NumThread_LightIntersection){
+        bool IsIntersectFurstum=IsIntersectSphereFrustum(Box,PointLightBuffer[i]);
+        [branch]
+        if(IsIntersectFurstum){
+            uint Index;
+            InterlockedAdd(Gs_ValidLightCount_ThisCluster,1,Index);
+            [branch]
+            if(Index<512){
+                Gs_ValidLightList_ThisCluster[Index]=i;
+            }
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+    [branch]
+    if(In.GroupIndex==0){
+        InterlockedAdd(GlobalValidLightCount_Buffer[0],Gs_ValidLightCount_ThisCluster,Gs_ValidLightStartOffset);//更新栈指针，Gs_ValidLightStartOffset为更新前的栈指针
+        LightAssignTable[Index3DTo1D(In.GroupID)]=uint2(Gs_ValidLightStartOffset,Gs_ValidLightCount_ThisCluster);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    [loop]
+    for(uint j=uint(In.GroupThreadID.z);j<Gs_ValidLightCount_ThisCluster;j+=NumThread_LightIntersection){
+        GlobalValidLightList[min(GlobalValidLightList_Count,Gs_ValidLightStartOffset+j)]=Gs_ValidLightList_ThisCluster[j];
+    }
+}
+

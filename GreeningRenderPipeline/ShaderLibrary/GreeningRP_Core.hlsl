@@ -1,8 +1,16 @@
 #ifndef GREENINGRP_CORE
 #define GREENINGRP_CORE
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 #include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Input.hlsl"
+
+#define PI 3.14159265358979323846f
+#define REVERSE_PI 0.318309886184f
+
+SamplerState point_clamp;
+SamplerState bilinear_clamp;
+SamplerState trilinear_clamp;
+SamplerState point_repeat;
+SamplerState bilinear_repeat;
+SamplerState trilinear_repeat;
 
 float Pow2(float a){
     return a*a;
@@ -12,6 +20,14 @@ int Encodefloat32Toint32(float In){
 }
 float Decodeint32Tofloat32(int In){
     return (float)In/16777216.0f;
+}
+float Pow4(float a){
+    a=a*a;
+    return a*a;
+}
+float3 SafeNormalize(float3 n){
+    float Length2=dot(n,n)+1e-6f;
+    return n*rsqrt(Length2);
 }
 float Pow5(float a){
     return Pow4(a)*a;
@@ -25,11 +41,40 @@ float3x3 GetTangentToWorldMatrix(float3 NormalWS,float3 TangentWS,float3 BiTange
                     NormalWS.x,NormalWS.y,NormalWS.z);
 }
 float3 DecodeNormalMap(float3 TangentWS,float3 NormalWS,float3 BiNormalWS,float3 NormalMap,float NormalMapIntensity,float ReversedNormalMap){
+    NormalMap=pow(NormalMap,0.4545f);
     NormalMap=NormalMap*2.0f-1.0f;
-    //NormalMap=NormalMap.yzx;
-    NormalMap.xy*=NormalMapIntensity*(ReversedNormalMap*2.0f-1.0f);
-    NormalMap.z=sqrt(1.01f-dot(NormalMap.xy,NormalMap.xy));
-    return SafeNormalize(mul(NormalMap,GetTangentToWorldMatrix(NormalWS,TangentWS,BiNormalWS)));
+    NormalMap=lerp(NormalMap.xyz,NormalMap.yxz,ReversedNormalMap);
+    return normalize(lerp(NormalWS,normalize(TangentWS*NormalMap.x+BiNormalWS*NormalMap.y+NormalWS*NormalMap.z),NormalMapIntensity));
+}
+float2 PackNormalOctQuadEncode(float3 n)
+{
+    n *= rcp(max(dot(abs(n), 1.0), 1e-6));
+    float t = saturate(-n.z);
+    return n.xy + (n.xy >= 0.0 ? t : -t);
+}
+
+float3 UnpackNormalOctQuadEncode(float2 f)
+{
+    float3 n = float3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+    float t = max(-n.z, 0.0);
+    n.xy += n.xy >= 0.0 ? -t.xx : t.xx;
+    return normalize(n);
+}
+float3 PackFloat2To888(float2 f)
+{
+    uint2 i = (uint2)(f * 4095.5);
+    uint2 hi = i >> 8;
+    uint2 lo = i & 255;
+    uint3 cb = uint3(lo, hi.x | (hi.y << 4));
+    return cb / 255.0;
+}
+float2 Unpack888ToFloat2(float3 x)
+{
+    uint3 i = (uint3)(x * 255.5);
+    uint hi = i.z >> 4;
+    uint lo = i.z & 15;
+    uint2 cb = i.xy | uint2(lo << 8, hi << 8);
+    return cb / 4095.0;
 }
 float3 PackOctNormal(float3 n){
     float2 octNormalWS = PackNormalOctQuadEncode(n);                  // values between [-1, +1], must use fp32 on some platforms.

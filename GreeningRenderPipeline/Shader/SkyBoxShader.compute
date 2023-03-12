@@ -6,7 +6,6 @@
 
 RWTexture2D<float4> DrawSkyBox_Dest;
 Texture2D SceneDepth;
-Texture2D SkyBoxMap;
 
 float Rotation;
 float Exposure;
@@ -22,5 +21,5 @@ void SkyBoxShader (uint3 id : SV_DispatchThreadID)
     float2 uv=id.xy*ScreenParams.xy;
     float3 PositionWS=GetPositionWS(uv,Ndcdepth);
     float3 ViewDirWS=normalize(_WorldSpaceCameraPos-PositionWS);
-    DrawSkyBox_Dest[id.xy]=SampleCubeMap(SkyBoxMap,ViewDirWS,Rotation,0).xyzz*Exposure;
+    DrawSkyBox_Dest[id.xy]=SkyBoxMap.SampleLevel(trilinear_clamp,-ViewDirWS,0).xyzw;
 }

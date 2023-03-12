@@ -13,6 +13,9 @@ half Pow2(half x){
 half LinearEyeDepth(half z){
     return (FarClipPlane*NearClipPlane)/((FarClipPlane-NearClipPlane)*z+NearClipPlane);
 }
+half Linear01Depth(half z){
+	return (LinearEyeDepth(z)-NearClipPlane)/(FarClipPlane-NearClipPlane);
+}
 half SampleSceneDepth(half2 uv)
 {
     return SceneDepth.SampleLevel(Point_Clamp, uv,0).x;
@@ -34,7 +37,7 @@ half Noise2D(half2 p)
     return frac((p3.x + p3.y) * p3.z);
 }
 half GetEyeDepth(half2 uv){
-    return LinearEyeDepth(SampleSceneDepth(uv),_ZBufferParams);
+    return LinearEyeDepth(SampleSceneDepth(uv));
 }
 half3 GetPositionVs(half2 uv){
 	float NdcDepth=SampleSceneDepth(uv);
@@ -84,9 +87,9 @@ half Luminance(half3 rgb){
 }
 half2 GetClosestUv(half2 uv){//要使用去除抖动的uv
 	half2 Closest_Offset=half2(0,0);
-	UNITY_UNROLL
+	[unroll]
 	for(int i=-1;i<=1;i++){
-		UNITY_UNROLL
+		[unroll]
 		for(int j=-1;j<=1;j++){
 			int flag=step(GetEyeDepth(uv),GetEyeDepth(uv+ScreenParams.xy*half2(i,j)));
 			Closest_Offset=lerp(Closest_Offset,half2(i,j),flag);
@@ -112,11 +115,11 @@ void GetBoundingBox(out half cmin,out half cmax,half2 uv){
 	cmax = max(ctl, max(ctc, max(ctr, max(cml, max(cmc, max(cmr, max(cbl, max(cbc, cbr))))))));
 }
 void FetchAOAndDepth(half2 uv, inout half ao, inout half depth,bool Is_X){
-	UNITY_BRANCH 
+	[branch] 
 	if(Is_X){ao = RT_Spatial_In_X.SampleLevel(Point_Clamp, uv,0).r;}
 	else{ao = RT_Spatial_In_Y.SampleLevel(Point_Clamp, uv,0).r;}
 	depth = SampleSceneDepth(uv);
-	depth = Linear01Depth(depth, _ZBufferParams);
+	depth = Linear01Depth(depth);
 }
 half CrossBilateralWeight(half r, half d, half d0){
 	half blurSigma = Kernel_Radius * 0.5;
@@ -136,7 +139,7 @@ void ProcessRadius(half2 uv0, half2 deltaUV, half d0, inout half totalAO, inout 
 	half ao;
 	half d;
 	half2 uv;
-	UNITY_LOOP
+	[loop]
 	for (int r = 1; r <= Kernel_Radius; r++)
 	{
 		uv = uv0 + r * deltaUV;

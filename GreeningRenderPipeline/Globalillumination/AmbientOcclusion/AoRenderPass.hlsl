@@ -42,7 +42,7 @@ half GetGTAO(half2 uv,half3 PositionVs,half3 NormalVs){
     half4 uvSlice;
     BentNormal=0;
     AO=0;
-    UNITY_LOOP
+    [loop]
     for(int i=0;i<DIRECTIONCOUNT;i++){
         Angle=PI*i/DIRECTIONCOUNT+AngleOffset;
         SliceDir=half3(cos(Angle),sin(Angle),0);
@@ -57,7 +57,7 @@ half GetGTAO(half2 uv,half3 PositionVs,half3 NormalVs){
         h=-1;
 
         half StepSize=max(1.0,lerp(0.9,1.1,Noise2D(uv))*GetUniformRadiusScale(uv)*RADIUSSCALE_GTAO*RADIUS / (STEPCOUNT + 1.0));
-        UNITY_LOOP
+        [loop]
         for(int j=0;j<STEPCOUNT;j++){
             uvoffset=SliceDir.xy*(1+j)*StepSize;
             uvoffset=round(uvoffset)*ScreenParams.xy;
@@ -99,12 +99,12 @@ half GetHBAO(half2 FullResUv,half3 PositionVs,half3 NormalVs){
     half StepSizePixels = max(1.0,lerp(0.8,1.2,Noise2D(FullResUv))*GetUniformRadiusScale(FullResUv)*RADIUSSCALE_HBAO*RADIUS / (STEPCOUNT + 1.0));
     half AngDelta=2.0*PI/DIRECTIONCOUNT;
     half Ao=0;
-    UNITY_LOOP
+    [loop]
     for(int i=0;i<DIRECTIONCOUNT;i++){
         half Angle=i*AngDelta;
         half2 Direction=RotateDirection(Rand.xy,Angle);
         half RayPixels=(Rand.z*StepSizePixels+1.0);//引入随机
-        UNITY_LOOP
+        [loop]
         for(int j=0;j<STEPCOUNT;j++){
             AccumulateHBAO(Ao,RayPixels,StepSizePixels,Direction,FullResUv,PositionVs,NormalVs);
         }

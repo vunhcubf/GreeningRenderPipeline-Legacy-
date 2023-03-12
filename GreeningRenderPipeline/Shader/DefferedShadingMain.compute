@@ -1,0 +1,129 @@
+#pragma kernel DefferedShading
+#pragma multi_compile __ CLUSTER_LIGHT
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_GBuffer.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Brdf.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_Lighting.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_ClusterLight.hlsl"
+#include "Assets/GreeningRenderPipeline/ShaderLibrary/GreeningRP_EnvironmentLighting.hlsl"
+
+RWTexture2D<float4> DefferedShading_Dest;
+#if defined CLUSTER_LIGHT
+RWStructuredBuffer<uint> GlobalValidLightList;
+RWStructuredBuffer<uint2> LightAssignTable;
+int NumClusterX;
+int NumClusterY;
+int NumClusterZ;
+bool UseClusterLight;
+int Index3DTo1D(int3 id3){
+    return id3.z*NumClusterX*NumClusterY+id3.y*NumClusterX+id3.x;
+}
+int3 GetCluster(float3 NdcPos){
+    float3 Pos;
+    Pos.xy=NdcPos.xy;
+    Pos.z=LinearEyeDepth(NdcPos.z);
+    Pos.z=(Pos.z-NearClipPlane)/(FarClipPlane-NearClipPlane);
+    Pos*=float3(NumClusterX,NumClusterY,NumClusterZ);
+    int3 id=(int3)floor(Pos);
+    return id;
+}
+#endif
+
+Texture2D GBuffer0;
+Texture2D GBuffer1;
+Texture2D GBuffer2;
+Texture2D SceneDepth;
+
+void DecodeGBuffer(int2 id,out float Roughness,out float Metallic,out float3 BaseColor,out float3 NormalWS,out float Occlusion){
+    float4 GBuffer0_Data=GBuffer0.Load(int3(id.xy,0)).xyzw;
+    float4 GBuffer1_Data=GBuffer1.Load(int3(id.xy,0)).xyzw;
+    float4 GBuffer2_Data=GBuffer2.Load(int3(id.xy,0)).xyzw;
+    BaseColor=GBuffer0_Data.xyz;
+    Occlusion=GBuffer0_Data.w;
+    Roughness=GBuffer2_Data.x;
+    Metallic=GBuffer2_Data.y;
+    NormalWS=UnpackNormal(GBuffer1_Data.xyz);
+}
+[numthreads(8,8,1)]
+void DefferedShading (uint3 id : SV_DispatchThreadID)
+{
+    float2 uv=id.xy*ScreenParams.xy;
+    float NdcDepth=SceneDepth.Load(int3(id.xy,0)).x;
+    [branch]
+    if(NdcDepth==0.0f){
+        DefferedShading_Dest[id.xy] = (0.0f).xxxx;
+        return;
+    }
+    float3 BaseColor,NormalWS;
+    float Occlusion,Roughness,Metallic;
+    DecodeGBuffer(id.xy,Roughness,Metallic,BaseColor,NormalWS,Occlusion);
+    
+    float3 PositionWS=GetPositionWS(uv,NdcDepth);
+    float3 ViewDirWS=normalize(_WorldSpaceCameraPos-PositionWS);
+    
+    float3 FinalColor=0;
+    //处理方向光
+    [branch]
+    if(IsAnyDirectionalLight){
+        [loop]
+        for(int i=0;i<DirectionalLightCount;i++){
+            float3 LightDir=GetDirectionalLight_Direction(i);
+            float3 LightColor=GetDirectionalLight_Color(i);
+            BxDFContext Context=BxDFContext_Init(NormalWS,ViewDirWS,LightDir);
+            FinalColor+=LightColor*Brdf_Diffuse_Specular_LearnOpengl(BaseColor,Roughness,Metallic,Context).xyz;
+        }
+    }
+
+    //处理聚光灯
+    [branch]
+    if(IsAnySpotLight){
+        [loop]
+        for(int i=0;i<SpotLightCount;i++){
+            float3 Direction=GetSpotLight_Direction(i);
+            float3 LightDir=GetSpotLight_LightDir(i,PositionWS);
+            float2 SpotLightAttenuation=GetSpotLight_AttenuationParams(i);
+            float3 Color=GetSpotLight_Color(i);
+            float AngleAttenuation=saturate(dot(Direction,LightDir)*SpotLightAttenuation.x+SpotLightAttenuation.y);
+            AngleAttenuation=smoothstep(0.0f,1.0f,AngleAttenuation);
+            AngleAttenuation=Pow2(AngleAttenuation);
+            float DistanceAttenuation=GetSpotLight_DistanceAttenuation(i,PositionWS);
+            float LightAttenuation=DistanceAttenuation*AngleAttenuation;
+            float3 LightRadiance=Color*LightAttenuation;
+
+            BxDFContext Context=BxDFContext_Init(NormalWS,ViewDirWS,LightDir);
+            FinalColor+=LightRadiance*Brdf_Diffuse_Specular_LearnOpengl(BaseColor,Roughness,Metallic,Context).xyz;
+        }
+    }
+
+    //处理点光
+    #if defined CLUSTER_LIGHT
+    int3 Cluster_Id=GetCurCluster(uv,NdcDepth,NumClusterX,NumClusterY,NumClusterZ);
+    int Cluster_Id_1D=Index3DTo1D(Cluster_Id);
+    uint2 GlobalLightStackInfo=LightAssignTable[Cluster_Id_1D];
+    [branch]
+    if(IsAnyPointLight){
+        [loop]
+        for(uint i=GlobalLightStackInfo.x;i<GlobalLightStackInfo.x+GlobalLightStackInfo.y;i++){
+            uint LigthIndex=GlobalValidLightList[i];
+            float3 LightDir=GetPointLight_Direction(LigthIndex,PositionWS);
+            float3 LightColor=GetPointLight_Color(LigthIndex);
+            float DistanceAttenuation=GetPointLight_DistanceAttenuation(LigthIndex,PositionWS);
+            BxDFContext Context=BxDFContext_Init(NormalWS,ViewDirWS,LightDir);
+            FinalColor+=DistanceAttenuation*LightColor*Brdf_Diffuse_Specular_LearnOpengl(BaseColor,Roughness,Metallic,Context).xyz;
+        }
+    }
+    #else
+    [branch]
+    if(IsAnyPointLight){
+        [loop]
+        for(int j=0;j<PointLightCount;j++){
+            float3 LightDir=GetPointLight_Direction(j,PositionWS);
+            float3 LightColor=GetPointLight_Color(j);
+            float DistanceAttenuation=GetPointLight_DistanceAttenuation(j,PositionWS);
+            BxDFContext Context=BxDFContext_Init(NormalWS,ViewDirWS,LightDir);
+            FinalColor+=DistanceAttenuation*LightColor*Brdf_Diffuse_Specular_LearnOpengl(BaseColor,Roughness,Metallic,Context).xyz;
+        }
+    }
+    #endif
+    FinalColor+=SampleEnvironment_Diffuse_Specular(Roughness,NormalWS,ViewDirWS,SkyBoxMap_MaxMipLevel,BaseColor,Metallic,Occlusion);
+    DefferedShading_Dest[id.xy] = FinalColor.xyzz;
+}

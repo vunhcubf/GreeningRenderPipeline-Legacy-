@@ -103,7 +103,6 @@ namespace UnityEngine.Rendering.GreeningRP
 
             //»æÖÆÌì¿ÕÇò
             DrawSkyBox();
-
             Cmd_Debug.Blit(RT_CameraTargetTexture_HDR, BuiltinRenderTextureType.CameraTarget);
             context.ExecuteCommandBuffer(Cmd_Debug);
             context.Submit();
@@ -159,7 +158,6 @@ namespace UnityEngine.Rendering.GreeningRP
             this.AverageOverlapLightCountPerCluster = light_settings.AverageOverlapLightCountPerCluster;
             this.DebugLightCount = light_settings.DebugLightCount;
             this.skybox_settings = SkyBoxSettings;
-            InitializePreComputeData(SkyBoxSettings, shader_resources, light_settings);
         }
         
     }

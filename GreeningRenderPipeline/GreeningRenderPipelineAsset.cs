@@ -30,8 +30,7 @@ namespace UnityEngine.Rendering.GreeningRP
             public ComputeShader ClusterLight_Shader;
             [Header("天空盒shader")]
             public ComputeShader SkyBox_Shader;
-            [Header("IBL间接光照shader")]
-            public ComputeShader IBL_Shader;
+            public Texture2D BrdfLut;
         }
         [System.Serializable]
         public class LightSetting
@@ -45,7 +44,7 @@ namespace UnityEngine.Rendering.GreeningRP
         [System.Serializable]
         public class SkyBoxSetting
         {
-            public Texture2D SkyBoxMap;
+            public Cubemap SkyBoxMap;
             public enum SkyBoxtype
             {
                 Panomanic,
